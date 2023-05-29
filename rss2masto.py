@@ -24,7 +24,7 @@ mastoTOKEN = ""
 mastoURL = ""
 mastoDB = ""
 mastoINI = "rss2masto.ini"
-debug = False   # this one you can edit, and change to False to suppress progress output
+debug = True   # this one you can edit, and change to False to suppress progress output
 ################################################################
 
 def read_config():
@@ -116,7 +116,7 @@ class rss2masto():
   def _mastoPOST(self):
     """ Post to Mastodon """
     headers = {'Content-Type':'application/x-www-form-URLencoded'}
-    data = {'status':f'FROM: {self.name}\nMAIN URL: {self.siteURL}\n\nTITLE: {self.entryTitle}\n\n{self.entryLink}'}
+    data = {'status':f'{self.entryTitle}\n\n{self.entryLink}'}
     try:
       r = requests.post(mastoURL, headers=headers, data=data)
     except requests.exceptions.RequestException as e:
@@ -130,14 +130,8 @@ class rss2masto():
   def process(self):
     """ Process a specific feed, using feedparser module """
     rssFeed = feedparser.parse(self.url)
-    if rssFeed.status == 301 or rssFeed.status == 302:
-      # We got a redirect response, let's see if we can grab the new suggested url (in rssFeed.href) instead...
-      if self._testURL(rssFeed.href):
-        if debug:
-          print(f"{self.url} responded with 301/302 to {rssFeed.href}... Trying that instead...")
-        rssFeed = feedparser.parse(rssFeed.href)
     if rssFeed.status != 200:
-      print(f"Error crawling {self.url}... Skipping...")
+      print("Error crawling {url}... Skipping...")
       return
     self.siteURL = rssFeed.feed.link
     for entry in rssFeed.entries:
@@ -145,6 +139,10 @@ class rss2masto():
       # NOTE: 'guid' in the RSS item translates to 'id' in the feedparser entry dict
       self.entryLink = None
       if "id" in entry:
+        hashtag=""
+        if "category" in entry:
+          for tag in entry["tags"]:
+            hashtag+=" #"+tag["term"]
         # 'id' (i,e, 'guid') is present
         if self._testURL(entry.id):
           # And it's a valid URL
@@ -160,8 +158,11 @@ class rss2masto():
         # entryLink wasn't set above, so we'll simply default to the only option available to us, which is entry.link
         self.entryLink = entry.link
 
-      self.entryTitle = entry.title.replace("\n","").replace("&nbsp;","")             # Some basic sanitizing that bs4 doesn't seem to do
+      self.entryTitle = entry.title.replace("\n","").replace("&nbsp;","").replace(" [duplicate]","").replace(" [closed]","")             # Some basic sanitizing that bs4 doesn't seem to do
       self.entryTitle = bs4.BeautifulSoup(self.entryTitle, features="html.parser").text    # And now let bs4 extract only the text (strip html tags)
+      hashtag = hashtag.replace("-","").replace(".","")
+      self.entryTitle += hashtag
+      self.entryLink += "/612"
 
       # Let's create a hash of our entryLink-entryTitle combo
       toHash = f"{self.entryLink}{self.entryTitle}"
@@ -175,6 +176,7 @@ class rss2masto():
         continue
 
       if self._mastoPOST():
+      #if True is True: # use this to put stuff in db without posting
         # Our post to Mastodon was successful
         # Let's update dict and DB
         self.existingHashes[entryDigest] = True
@@ -209,7 +211,8 @@ if __name__ == '__main__':
   #rss2masto("<friendly-name>", "<feed url>", conn, existingHashes).process()
 
   # Some examples:
-  rss2masto("DARING FIREBALL", "https://daringfireball.net/feeds/main", conn, existingHashes).process()
+  rss2masto("AskUbuntu", "https://askubuntu.com/feeds/hot", conn, existingHashes).process()
+  #rss2masto("DARING FIREBALL", "https://daringfireball.net/feeds/main", conn, existingHashes).process()
   #rss2masto("Open Access Tracking Project", "http://tagteam.harvard.edu/remix/oatp/items.rss", conn, existingHashes).process()
   #rss2masto("CASEYLISS.COM", "https://www.caseyliss.com/rss", conn, existingHashes).process()
   #rss2masto("NYT US", "https://rss.nytimes.com/services/xml/rss/nyt/US.xml", conn, existingHashes).process() 
